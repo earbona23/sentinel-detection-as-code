@@ -1,0 +1,231 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/earbona23/sentinel-detection-as-code/schema/detection.schema.json",
+  "title": "Sentinel Detection Rule",
+  "description": "Contract every detection in this repository must satisfy. It is a superset of the Microsoft Sentinel scheduled analytics rule format: Sentinel decides what the platform will accept, this schema decides what deserves to reach an analyst. The extra fields (falsePositives, responseSteps, severityJustification) are not optional here — a rule without them is an alert nobody can act on at 3 AM.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "name",
+    "description",
+    "severity",
+    "severityJustification",
+    "requiredDataConnectors",
+    "queryFrequency",
+    "queryPeriod",
+    "triggerOperator",
+    "triggerThreshold",
+    "tactics",
+    "relevantTechniques",
+    "query",
+    "entityMappings",
+    "falsePositives",
+    "responseSteps",
+    "validationStatus",
+    "version",
+    "kind"
+  ],
+  "properties": {
+    "id": {
+      "description": "Stable GUID. Sentinel uses it to tell an updated rule from a new one — never reuse or regenerate it.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "name": {
+      "description": "Display name in the Sentinel portal. Must describe the BEHAVIOUR, not the tool.",
+      "type": "string",
+      "minLength": 10,
+      "maxLength": 128
+    },
+    "description": {
+      "description": "What this rule detects and why it matters. Written for the analyst who receives the alert, not for the author.",
+      "type": "string",
+      "minLength": 60
+    },
+    "severity": {
+      "description": "Sentinel severity. Justify it in severityJustification.",
+      "type": "string",
+      "enum": ["High", "Medium", "Low", "Informational"]
+    },
+    "severityJustification": {
+      "description": "Why THIS severity and not the one above or below. Not in the Sentinel schema: added here because an unjustified severity is how alert fatigue starts.",
+      "type": "string",
+      "minLength": 40
+    },
+    "requiredDataConnectors": {
+      "description": "Which connectors must be enabled. If this is wrong the rule silently returns nothing — which looks exactly like 'no attacks'.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["connectorId", "dataTypes"],
+        "properties": {
+          "connectorId": { "type": "string", "minLength": 3 },
+          "dataTypes": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "minLength": 3 }
+          }
+        }
+      }
+    },
+    "queryFrequency": {
+      "description": "How often the rule runs (ISO 8601 duration, e.g. PT1H).",
+      "type": "string",
+      "pattern": "^P(T?\\d+[DHMS])+$"
+    },
+    "queryPeriod": {
+      "description": "How far back the query looks. Must be >= queryFrequency or events fall through the gap between runs; the validator checks this.",
+      "type": "string",
+      "pattern": "^P(T?\\d+[DHMS])+$"
+    },
+    "triggerOperator": {
+      "type": "string",
+      "enum": ["gt", "lt", "eq", "ne"]
+    },
+    "triggerThreshold": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "tactics": {
+      "description": "MITRE ATT&CK tactics, in Sentinel's PascalCase spelling.",
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "Reconnaissance",
+          "ResourceDevelopment",
+          "InitialAccess",
+          "Execution",
+          "Persistence",
+          "PrivilegeEscalation",
+          "DefenseEvasion",
+          "CredentialAccess",
+          "Discovery",
+          "LateralMovement",
+          "Collection",
+          "CommandAndControl",
+          "Exfiltration",
+          "Impact"
+        ]
+      }
+    },
+    "relevantTechniques": {
+      "description": "ATT&CK technique IDs. The validator checks each one against a pinned local copy of the ATT&CK catalogue and rejects anything that does not exist, is deprecated or was revoked.",
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^T\\d{4}(\\.\\d{3})?$"
+      }
+    },
+    "query": {
+      "description": "The KQL. Validated with the real Microsoft Kusto parser, not with regular expressions.",
+      "type": "string",
+      "minLength": 20
+    },
+    "entityMappings": {
+      "description": "Maps query columns to Sentinel entities. Without this an alert is a row of text: no pivoting, no correlation, no incident graph.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["entityType", "fieldMappings"],
+        "properties": {
+          "entityType": {
+            "type": "string",
+            "enum": [
+              "Account",
+              "Host",
+              "IP",
+              "URL",
+              "FileHash",
+              "AzureResource",
+              "CloudApplication",
+              "MailMessage",
+              "Mailbox",
+              "SecurityGroup",
+              "File",
+              "Process",
+              "DNS",
+              "RegistryKey"
+            ]
+          },
+          "fieldMappings": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["identifier", "columnName"],
+              "properties": {
+                "identifier": { "type": "string", "minLength": 2 },
+                "columnName": { "type": "string", "minLength": 1 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "falsePositives": {
+      "description": "Known benign scenarios that trigger this rule, each with how to tell it apart. NOT in the Sentinel schema. Required here because the first question an analyst asks is 'is this real?', and a rule that cannot answer it gets muted — and a muted rule is worse than no rule, because it looks like coverage.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["scenario", "howToDistinguish"],
+        "properties": {
+          "scenario": { "type": "string", "minLength": 15 },
+          "howToDistinguish": { "type": "string", "minLength": 15 }
+        }
+      }
+    },
+    "responseSteps": {
+      "description": "Ordered triage steps. NOT in the Sentinel schema. Required here because an alert without a next step delegates the thinking to whoever is on call at 3 AM.",
+      "type": "array",
+      "minItems": 2,
+      "items": { "type": "string", "minLength": 15 }
+    },
+    "validationStatus": {
+      "description": "Honesty field. Says whether this rule was actually run against data, or only written. A recruiter reading 'tested' on a rule that never ran learns something worse than a gap in coverage.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state"],
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "tested-with-real-data",
+            "tested-with-synthetic-data",
+            "syntax-only-not-executed"
+          ]
+        },
+        "notes": { "type": "string" }
+      }
+    },
+    "playbook": {
+      "description": "Optional. Path to the automated response wired to this rule.",
+      "type": "string"
+    },
+    "references": {
+      "description": "Optional. Vendor or research links backing the detection logic.",
+      "type": "array",
+      "items": { "type": "string", "format": "uri" }
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["Scheduled", "NRT"]
+    }
+  }
+}
