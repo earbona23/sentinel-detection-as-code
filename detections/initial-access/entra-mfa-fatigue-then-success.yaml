@@ -1,0 +1,66 @@
+id: a3fbe2ea-0e6e-4d70-aa83-0ed2f519796d
+name: Inicio de sesion exitoso tras una rafaga de MFA denegados
+description: >
+  Detecta el patron de "fatiga de MFA" o MFA bombing. El atacante ya tiene la contrasena valida
+  y dispara notificaciones de MFA repetidas hasta que el usuario aprueba una por cansancio o
+  por error. La senal es la SECUENCIA, no el volumen: varios rechazos de MFA seguidos de una
+  aprobacion exitosa para el mismo usuario en una ventana corta.
+severity: High
+severityJustification: >
+  High porque a diferencia del spraying, aca la contrasena YA esta comprometida y hubo un
+  acceso EXITOSO. No es reconocimiento: es un compromiso consumado que requiere respuesta
+  inmediata, no analisis.
+requiredDataConnectors:
+  - connectorId: AzureActiveDirectory
+    dataTypes:
+      - SigninLogs
+queryFrequency: PT30M
+queryPeriod: PT1H
+triggerOperator: gt
+triggerThreshold: 0
+tactics:
+  - InitialAccess
+relevantTechniques:
+  - T1078.004
+query: |
+  let ventana = 1h;
+  let fallosMfa = SigninLogs
+    | where TimeGenerated > ago(ventana)
+    | where ResultType in ("50074", "500121")
+    | summarize RechazosMfa = count(), PrimerRechazo = min(TimeGenerated) by UserPrincipalName;
+  SigninLogs
+  | where TimeGenerated > ago(ventana)
+  | where ResultType == 0
+  | join kind=inner fallosMfa on UserPrincipalName
+  | where TimeGenerated > PrimerRechazo
+  | where RechazosMfa >= 5
+  | project TimeGenerated, UserPrincipalName, IPAddress, RechazosMfa, AppDisplayName, Location
+entityMappings:
+  - entityType: Account
+    fieldMappings:
+      - identifier: FullName
+        columnName: UserPrincipalName
+  - entityType: IP
+    fieldMappings:
+      - identifier: Address
+        columnName: IPAddress
+falsePositives:
+  - scenario: Usuario con un telefono nuevo o con problemas de conectividad que rechaza sin querer.
+    howToDistinguish: >
+      Los rechazos vienen de la MISMA IP y ubicacion que el exito posterior. En un ataque real
+      la IP del atacante y la del usuario suelen diferir.
+  - scenario: Aplicacion mal configurada que reintenta autenticacion en bucle.
+    howToDistinguish: "Revisar AppDisplayName: si siempre es la misma app no interactiva, es configuracion."
+responseSteps:
+  - "Revocar las sesiones activas del usuario de inmediato: no esperar a confirmar."
+  - Comparar la IP y ubicacion de los rechazos contra la del inicio exitoso.
+  - Forzar cambio de contrasena y re-registro del metodo de MFA.
+  - Revisar que hizo esa sesion despues del acceso, sobre todo cambios en metodos de autenticacion.
+validationStatus:
+  state: syntax-only-not-executed
+  notes: >
+    Los ResultType 50074 y 500121 corresponden a MFA requerido no satisfecho y a fallo de la
+    autenticacion fuerte. Verificar contra la documentacion vigente de Entra antes de desplegar.
+playbook: playbooks/revoke-sessions-on-mfa-fatigue/azuredeploy.json
+version: 1.0.0
+kind: Scheduled

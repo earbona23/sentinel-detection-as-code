@@ -1,0 +1,52 @@
+id: bf9615a4-2728-4370-b71a-4b1014f22d00
+name: Dominio federado o relacion de confianza nueva en el tenant
+description: >
+  Detecta la creacion o modificacion de una federacion de dominio en Entra ID. Es la base del
+  ataque conocido como Golden SAML: quien controla la federacion puede emitir tokens validos
+  para CUALQUIER usuario del tenant, incluidos administradores, sin conocer ninguna contrasena
+  y sin pasar por MFA.
+severity: High
+severityJustification: >
+  High sin discusion. Es de las pocas tecnicas que otorgan control efectivo del tenant completo
+  en una sola operacion, y el acceso resultante es indistinguible de un inicio de sesion
+  legitimo en los registros.
+requiredDataConnectors:
+  - connectorId: AzureActiveDirectory
+    dataTypes:
+      - AuditLogs
+queryFrequency: PT15M
+queryPeriod: PT1H
+triggerOperator: gt
+triggerThreshold: 0
+tactics:
+  - PrivilegeEscalation
+  - DefenseEvasion
+relevantTechniques:
+  - T1484.002
+query: |
+  AuditLogs
+  | where TimeGenerated > ago(1h)
+  | where OperationName has_any ("Set domain authentication", "Set federation settings on domain", "Add unverified domain")
+  | extend Actor = tostring(InitiatedBy.user.userPrincipalName)
+  | extend Dominio = tostring(TargetResources[0].displayName)
+  | project TimeGenerated, OperationName, Actor, Dominio, Result, CorrelationId
+entityMappings:
+  - entityType: Account
+    fieldMappings:
+      - identifier: FullName
+        columnName: Actor
+falsePositives:
+  - scenario: Migracion planificada a un proveedor de identidad federado.
+    howToDistinguish: Existe un cambio aprobado y el actor es del equipo de identidad.
+  - scenario: Alta legitima de un dominio nuevo de la organizacion.
+    howToDistinguish: Verificar que el dominio pertenezca de verdad a la empresa.
+responseSteps:
+  - "Tratar como incidente critico hasta demostrar lo contrario: no esperar confirmacion."
+  - Verificar si el dominio federado pertenece a la organizacion.
+  - Revisar los inicios de sesion posteriores que usaron esa federacion.
+  - "Si no esta autorizado: revertir la federacion y rotar los certificados de firma de tokens."
+validationStatus:
+  state: syntax-only-not-executed
+  notes: Frecuencia de 15 minutos a proposito por la gravedad; el volumen de estos eventos es minimo.
+version: 1.0.0
+kind: Scheduled

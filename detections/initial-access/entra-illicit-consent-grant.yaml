@@ -1,0 +1,63 @@
+id: 4b94962b-5e46-4060-9b67-e19cb3fb9707
+name: Consentimiento otorgado a una aplicacion OAuth sospechosa
+description: >
+  Detecta cuando un usuario le concede permisos a una aplicacion registrada fuera del tenant.
+  Es el ataque de consentimiento ilicito: no se roba ninguna contrasena, se convence al usuario
+  de que autorice una app que despues lee su correo y sus archivos con un token propio. Como no
+  hay credencial robada, cambiar la contrasena y resetear el MFA no quitan el acceso.
+severity: High
+severityJustification: >
+  High porque el acceso resultante sobrevive a toda la respuesta habitual ante un compromiso.
+  Mientras el consentimiento siga otorgado, la aplicacion conserva el acceso aunque el usuario
+  cambie la contrasena todos los dias.
+requiredDataConnectors:
+  - connectorId: AzureActiveDirectory
+    dataTypes:
+      - AuditLogs
+queryFrequency: PT1H
+queryPeriod: PT1H
+triggerOperator: gt
+triggerThreshold: 0
+tactics:
+  - InitialAccess
+relevantTechniques:
+  - T1528
+query: |
+  let permisosSensibles = dynamic([
+    "Mail.Read", "Mail.ReadWrite", "Mail.Send", "Files.Read.All", "Files.ReadWrite.All",
+    "Directory.Read.All", "User.Read.All", "offline_access"]);
+  AuditLogs
+  | where TimeGenerated > ago(1h)
+  | where OperationName == "Consent to application"
+  | where Result == "success"
+  | extend Actor = tostring(InitiatedBy.user.userPrincipalName)
+  | extend App = tostring(TargetResources[0].displayName)
+  | extend Permisos = tostring(TargetResources[0].modifiedProperties)
+  | where Permisos has_any (permisosSensibles)
+  | project TimeGenerated, Actor, App, Permisos, CorrelationId
+entityMappings:
+  - entityType: Account
+    fieldMappings:
+      - identifier: FullName
+        columnName: Actor
+  - entityType: CloudApplication
+    fieldMappings:
+      - identifier: Name
+        columnName: App
+falsePositives:
+  - scenario: Aplicacion de productividad legitima aprobada por la organizacion.
+    howToDistinguish: La app figura en la lista de aplicaciones aprobadas y el editor esta verificado.
+  - scenario: Herramienta interna de desarrollo en pruebas.
+    howToDistinguish: El registro pertenece al propio tenant y lo consintio alguien del equipo.
+responseSteps:
+  - "Revisar el editor de la aplicacion: un editor no verificado con permisos de correo es la senal mas fuerte."
+  - Ver cuantos usuarios mas consintieron la misma aplicacion.
+  - "Si es maliciosa: revocar el consentimiento y eliminar el service principal del tenant."
+  - "Revisar que datos accedio la aplicacion mientras tuvo permiso: el acceso ya ocurrio."
+validationStatus:
+  state: syntax-only-not-executed
+  notes: >
+    Vale acompanarla de una politica que exija aprobacion de administrador para el consentimiento
+    de usuarios. La deteccion avisa; la politica lo previene.
+version: 1.0.0
+kind: Scheduled

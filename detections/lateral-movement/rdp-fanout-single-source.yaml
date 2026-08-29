@@ -1,0 +1,62 @@
+id: 38182225-2a28-4eff-916f-60484457b174
+name: Un mismo origen abre RDP contra muchos destinos
+description: >
+  Detecta movimiento lateral por escritorio remoto: un unico equipo de origen autenticandose
+  por RDP contra un numero inusual de destinos en poco tiempo. Un usuario normal se conecta a
+  uno o dos servidores; un atacante recorriendo la red toca muchos.
+severity: Medium
+severityJustification: >
+  Medium porque los administradores de sistemas producen este patron de forma legitima a diario.
+  Sube a High si el origen no es una estacion administrativa conocida o si ocurre fuera de horario.
+requiredDataConnectors:
+  - connectorId: SecurityEvents
+    dataTypes:
+      - SecurityEvent
+queryFrequency: PT1H
+queryPeriod: PT1H
+triggerOperator: gt
+triggerThreshold: 0
+tactics:
+  - LateralMovement
+relevantTechniques:
+  - T1021.001
+query: |
+  SecurityEvent
+  | where TimeGenerated > ago(1h)
+  | where EventID == 4624
+  | where LogonType == 10
+  | summarize
+      DestinosDistintos = dcount(Computer),
+      Destinos = make_set(Computer, 25),
+      Sesiones = count()
+      by Account, IpAddress, bin(TimeGenerated, 30m)
+  | where DestinosDistintos >= 5
+  | project TimeGenerated, Account, IpAddress, DestinosDistintos, Sesiones, Destinos
+entityMappings:
+  - entityType: Account
+    fieldMappings:
+      - identifier: Name
+        columnName: Account
+  - entityType: IP
+    fieldMappings:
+      - identifier: Address
+        columnName: IpAddress
+falsePositives:
+  - scenario: Administrador de sistemas haciendo mantenimiento en varios servidores.
+    howToDistinguish: >
+      El origen es una estacion administrativa conocida, ocurre en horario laboral y los
+      destinos coinciden con un grupo funcional coherente.
+  - scenario: Herramienta de monitoreo o inventario que se conecta por RDP.
+    howToDistinguish: La cuenta es de servicio y el patron se repite con periodicidad exacta.
+responseSteps:
+  - Identificar si el equipo de origen es una estacion administrativa autorizada.
+  - "Revisar la secuencia de destinos: un recorrido por subred sugiere barrido, no trabajo."
+  - Correlacionar con la hora y comparar contra la linea base de esa cuenta.
+  - "Si no se justifica: aislar el origen antes de continuar la investigacion."
+validationStatus:
+  state: syntax-only-not-executed
+  notes: >
+    LogonType 10 es RemoteInteractive (RDP). Requiere el agente de Azure Monitor en los equipos;
+    no disponible sin maquinas conectadas al workspace.
+version: 1.0.0
+kind: Scheduled

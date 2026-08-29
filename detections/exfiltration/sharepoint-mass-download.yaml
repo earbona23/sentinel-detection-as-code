@@ -1,0 +1,60 @@
+id: 3ce30022-d886-4734-9037-68b8f4964fb0
+name: Descarga masiva de archivos desde SharePoint u OneDrive
+description: >
+  Detecta a un unico usuario descargando una cantidad inusual de archivos en poco tiempo. Es el
+  patron tipico de exfiltracion antes de una renuncia, o de una cuenta comprometida vaciando el
+  contenido al que tiene acceso.
+severity: Medium
+severityJustification: >
+  Medium porque hay motivos legitimos —sincronizacion de OneDrive, respaldo local, migracion— y
+  tratarlo como High generaria alertas constantes. Sube a High si la cuenta esta en preaviso de
+  salida o si los archivos provienen de sitios clasificados.
+requiredDataConnectors:
+  - connectorId: Office365
+    dataTypes:
+      - OfficeActivity
+queryFrequency: PT1H
+queryPeriod: PT1H
+triggerOperator: gt
+triggerThreshold: 0
+tactics:
+  - Exfiltration
+relevantTechniques:
+  - T1567
+query: |
+  OfficeActivity
+  | where TimeGenerated > ago(1h)
+  | where Operation in ("FileDownloaded", "FileSyncDownloadedFull")
+  | summarize
+      Archivos = count(),
+      SitiosDistintos = dcount(Site_Url),
+      Ejemplos = make_set(OfficeObjectId, 10)
+      by UserId, ClientIP, bin(TimeGenerated, 30m)
+  | where Archivos >= 100
+  | project TimeGenerated, UserId, ClientIP, Archivos, SitiosDistintos, Ejemplos
+entityMappings:
+  - entityType: Account
+    fieldMappings:
+      - identifier: FullName
+        columnName: UserId
+  - entityType: IP
+    fieldMappings:
+      - identifier: Address
+        columnName: ClientIP
+falsePositives:
+  - scenario: Sincronizacion inicial de OneDrive en un equipo nuevo.
+    howToDistinguish: >
+      La operacion es FileSyncDownloadedFull y ocurre una sola vez tras el alta del dispositivo.
+      Una descarga por navegador sostenida es distinta.
+  - scenario: Migracion o respaldo autorizado de un sitio.
+    howToDistinguish: Coincide con una ventana de migracion planificada y lo ejecuta el equipo correspondiente.
+responseSteps:
+  - "Comparar contra la linea base del usuario: 100 archivos puede ser normal para algunos roles."
+  - "Revisar la IP de origen: descarga desde fuera de la red corporativa agrava el caso."
+  - Identificar la sensibilidad de los sitios afectados.
+  - "Si la cuenta esta en proceso de salida: escalar a recursos humanos y legal, no solo a seguridad."
+validationStatus:
+  state: syntax-only-not-executed
+  notes: El umbral de 100 archivos es un punto de partida; hay que calibrarlo con la linea base real.
+version: 1.0.0
+kind: Scheduled

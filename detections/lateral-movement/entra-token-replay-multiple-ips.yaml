@@ -1,0 +1,65 @@
+id: fcbcd9b3-8a97-40fd-92c3-b3cb16770c78
+name: Mismo token de sesion usado desde direcciones IP distintas
+description: >
+  Detecta reutilizacion de token de sesion: un mismo identificador de sesion aparece usado desde
+  IP y paises diferentes en una ventana corta. Indica que el token fue robado —por malware, por
+  un proxy adversario o desde el navegador— y esta siendo reproducido por un tercero. El atacante
+  no necesita la contrasena ni pasar por MFA, porque el token ya representa una sesion autenticada.
+severity: High
+severityJustification: >
+  High porque el robo de token esquiva por completo la contrasena y el segundo factor. Cambiar la
+  contrasena no cierra el acceso; hay que revocar la sesion, y eso hace que la respuesta habitual
+  falle si no se identifica correctamente.
+requiredDataConnectors:
+  - connectorId: AzureActiveDirectory
+    dataTypes:
+      - SigninLogs
+queryFrequency: PT30M
+queryPeriod: PT2H
+triggerOperator: gt
+triggerThreshold: 0
+tactics:
+  - LateralMovement
+relevantTechniques:
+  - T1550.001
+query: |
+  SigninLogs
+  | where TimeGenerated > ago(2h)
+  | where ResultType == 0
+  | where isnotempty(CorrelationId)
+  | extend Pais = tostring(LocationDetails.countryOrRegion)
+  | summarize
+      IpsDistintas = dcount(IPAddress),
+      PaisesDistintos = dcount(Pais),
+      Ips = make_set(IPAddress, 10),
+      Paises = make_set(Pais, 10),
+      Primero = min(TimeGenerated),
+      Ultimo = max(TimeGenerated)
+      by UserPrincipalName, CorrelationId
+  | where IpsDistintas > 1 and PaisesDistintos > 1
+  | extend MinutosEntreUsos = datetime_diff('minute', Ultimo, Primero)
+  | project Primero, UserPrincipalName, IpsDistintas, PaisesDistintos, Ips, Paises, MinutosEntreUsos
+entityMappings:
+  - entityType: Account
+    fieldMappings:
+      - identifier: FullName
+        columnName: UserPrincipalName
+falsePositives:
+  - scenario: Usuario que cambia de red mientras trabaja, por ejemplo de wifi a datos moviles.
+    howToDistinguish: >
+      El cambio de IP dentro del mismo pais es normal. Esta regla exige paises distintos
+      justamente para reducir ese ruido.
+  - scenario: VPN corporativa con salida en otro pais.
+    howToDistinguish: Las IP de salida de la VPN son conocidas y se pueden excluir por rango.
+responseSteps:
+  - "Revocar las sesiones del usuario: cambiar la contrasena NO invalida el token robado."
+  - Verificar si alguna de las IP corresponde a una VPN corporativa conocida.
+  - Revisar que hizo la sesion desde la IP que no reconoces.
+  - Buscar en el equipo del usuario indicios de robo de token en el navegador.
+validationStatus:
+  state: syntax-only-not-executed
+  notes: >
+    Usa CorrelationId como aproximacion a la sesion. Es una aproximacion, no el identificador
+    real de sesion; validar contra datos del tenant antes de confiar en el umbral.
+version: 1.0.0
+kind: Scheduled

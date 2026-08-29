@@ -1,0 +1,55 @@
+id: 3bba13af-c861-404a-a9c5-910d1f060290
+name: Rol Owner o Contributor asignado a nivel de suscripcion
+description: >
+  Detecta asignaciones de roles de alto privilegio en el plano de Azure Resource Manager, que es
+  DISTINTO del directorio de Entra ID. Un Owner de suscripcion controla la infraestructura:
+  maquinas, redes, almacenamiento y las identidades administradas que corren ahi.
+severity: High
+severityJustification: >
+  High porque el alcance de suscripcion abarca todos los recursos por debajo. Ademas permite
+  crear identidades administradas nuevas y usarlas para moverse, sin volver a tocar Entra ID.
+requiredDataConnectors:
+  - connectorId: AzureActivity
+    dataTypes:
+      - AzureActivity
+queryFrequency: PT15M
+queryPeriod: PT1H
+triggerOperator: gt
+triggerThreshold: 0
+tactics:
+  - PrivilegeEscalation
+relevantTechniques:
+  - T1098.003
+query: |
+  AzureActivity
+  | where TimeGenerated > ago(1h)
+  | where OperationNameValue =~ "MICROSOFT.AUTHORIZATION/ROLEASSIGNMENTS/WRITE"
+  | where ActivityStatusValue =~ "Success"
+  | extend Alcance = tostring(parse_json(Properties).scope)
+  | where Alcance matches regex @"^/subscriptions/[^/]+$"
+  | project TimeGenerated, Caller, CallerIpAddress, Alcance, ResourceGroup, CorrelationId
+entityMappings:
+  - entityType: Account
+    fieldMappings:
+      - identifier: FullName
+        columnName: Caller
+  - entityType: IP
+    fieldMappings:
+      - identifier: Address
+        columnName: CallerIpAddress
+falsePositives:
+  - scenario: Onboarding de un ingeniero nuevo con permisos sobre la suscripcion.
+    howToDistinguish: Coincide con un alta de personal y lo ejecuta el equipo de plataforma.
+  - scenario: Automatizacion de infraestructura que asigna roles como parte del despliegue.
+    howToDistinguish: El Caller es un service principal conocido y el patron se repite en cada despliegue.
+responseSteps:
+  - "Verificar el alcance: una asignacion a nivel de suscripcion es mucho mas grave que a un grupo de recursos."
+  - Confirmar que quien la hizo tenia autorizacion.
+  - Revisar los recursos creados o modificados por el beneficiario despues de la asignacion.
+validationStatus:
+  state: syntax-only-not-executed
+  notes: >
+    El filtro de alcance con expresion regular distingue suscripcion completa de grupo de
+    recursos. Es la diferencia entre un incidente y una operacion rutinaria.
+version: 1.0.0
+kind: Scheduled

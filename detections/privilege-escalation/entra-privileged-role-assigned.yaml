@@ -1,0 +1,60 @@
+id: 4595f000-424a-423f-a925-e280502bea8f
+name: Usuario anadido a un rol privilegiado de directorio
+description: >
+  Detecta la asignacion de roles administrativos de Entra ID como Global Administrator o
+  Privileged Role Administrator. Es el paso que convierte un compromiso de una cuenta cualquiera
+  en control del tenant, y suele ocurrir minutos despues del acceso inicial.
+severity: High
+severityJustification: >
+  High porque un rol privilegiado permite crear identidades nuevas, cambiar politicas de acceso
+  condicional y desactivar la propia auditoria. Es el punto donde el atacante deja de depender
+  de la cuenta que comprometio.
+requiredDataConnectors:
+  - connectorId: AzureActiveDirectory
+    dataTypes:
+      - AuditLogs
+queryFrequency: PT15M
+queryPeriod: PT1H
+triggerOperator: gt
+triggerThreshold: 0
+tactics:
+  - PrivilegeEscalation
+relevantTechniques:
+  - T1098.003
+query: |
+  let rolesCriticos = dynamic([
+    "Global Administrator", "Privileged Role Administrator", "Security Administrator",
+    "Exchange Administrator", "Application Administrator", "User Administrator"]);
+  AuditLogs
+  | where TimeGenerated > ago(1h)
+  | where OperationName == "Add member to role"
+  | where Result == "success"
+  | extend Rol = tostring(TargetResources[0].modifiedProperties[1].newValue)
+  | extend Actor = tostring(InitiatedBy.user.userPrincipalName)
+  | extend Beneficiario = tostring(TargetResources[0].userPrincipalName)
+  | where Rol has_any (rolesCriticos)
+  | project TimeGenerated, Rol, Actor, Beneficiario, CorrelationId
+entityMappings:
+  - entityType: Account
+    fieldMappings:
+      - identifier: FullName
+        columnName: Beneficiario
+falsePositives:
+  - scenario: Alta de un administrador nuevo aprobada por el equipo de identidad.
+    howToDistinguish: Existe un ticket de aprobacion y el actor pertenece al equipo correspondiente.
+  - scenario: Activacion temporal de rol mediante PIM.
+    howToDistinguish: >
+      Las activaciones de PIM generan operaciones propias y tienen vencimiento. Una asignacion
+      permanente donde la organizacion usa PIM es la senal de alarma.
+responseSteps:
+  - "Confirmar si la asignacion estaba aprobada: preguntar, no asumir."
+  - Revisar si quien la hizo tenia permiso para hacerlo.
+  - Revisar la actividad de la cuenta beneficiaria desde ese momento.
+  - "Si no estaba autorizada: quitar el rol, revocar sesiones y auditar todo lo que hizo."
+validationStatus:
+  state: syntax-only-not-executed
+  notes: >
+    El indice de modifiedProperties varia segun el tipo de evento; verificar contra datos reales
+    del tenant antes de desplegar, porque un indice equivocado devuelve vacio en silencio.
+version: 1.0.0
+kind: Scheduled

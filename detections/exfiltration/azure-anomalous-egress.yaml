@@ -1,0 +1,65 @@
+id: cb2bf621-f937-496a-bdf5-4bd842d103f6
+name: Volumen de salida anomalo desde un recurso de Azure
+description: >
+  Detecta operaciones de exportacion o copia masiva de datos desde recursos de Azure hacia
+  destinos fuera de la suscripcion. Cubre el paso final de la cadena: sacar los datos, ya sea
+  por exportacion de una base, snapshot de disco copiado afuera, o generacion de tokens de
+  acceso a almacenamiento.
+severity: Medium
+severityJustification: >
+  Medium porque exportar datos es una operacion administrativa comun y legitima. Lo que la vuelve
+  sospechosa es el actor, la hora y el destino, y eso lo decide el analista, no la regla.
+requiredDataConnectors:
+  - connectorId: AzureActivity
+    dataTypes:
+      - AzureActivity
+queryFrequency: PT1H
+queryPeriod: PT1H
+triggerOperator: gt
+triggerThreshold: 0
+tactics:
+  - Exfiltration
+relevantTechniques:
+  - T1048
+query: |
+  AzureActivity
+  | where TimeGenerated > ago(1h)
+  | where ActivityStatusValue =~ "Success"
+  | where OperationNameValue has_any (
+      "MICROSOFT.SQL/SERVERS/DATABASES/EXPORT/ACTION",
+      "MICROSOFT.STORAGE/STORAGEACCOUNTS/LISTKEYS/ACTION",
+      "MICROSOFT.COMPUTE/DISKS/BEGINGETACCESS/ACTION",
+      "MICROSOFT.STORAGE/STORAGEACCOUNTS/LISTACCOUNTSAS/ACTION")
+  | summarize
+      Operaciones = count(),
+      TiposDistintos = dcount(OperationNameValue),
+      Recursos = make_set(Resource, 15)
+      by Caller, CallerIpAddress, bin(TimeGenerated, 30m)
+  | where Operaciones >= 3
+  | project TimeGenerated, Caller, CallerIpAddress, Operaciones, TiposDistintos, Recursos
+entityMappings:
+  - entityType: Account
+    fieldMappings:
+      - identifier: FullName
+        columnName: Caller
+  - entityType: IP
+    fieldMappings:
+      - identifier: Address
+        columnName: CallerIpAddress
+falsePositives:
+  - scenario: Rutina de respaldo que exporta bases o genera tokens de acceso.
+    howToDistinguish: El Caller es un service principal de automatizacion y el patron es periodico.
+  - scenario: Trabajo de migracion o recuperacion ante desastre.
+    howToDistinguish: Coincide con una ventana planificada y hay un cambio aprobado.
+responseSteps:
+  - "Identificar si el Caller es una identidad humana o de automatizacion."
+  - "Revisar la IP: una operacion administrativa desde una IP residencial desconocida es anomala."
+  - Determinar que datos contienen los recursos afectados.
+  - "Si se generaron claves o tokens de acceso: rotarlos, porque siguen siendo validos aunque se cierre el acceso."
+validationStatus:
+  state: syntax-only-not-executed
+  notes: >
+    ListKeys y ListAccountSAS son especialmente relevantes porque las credenciales que devuelven
+    sobreviven a la revocacion de la sesion que las pidio.
+version: 1.0.0
+kind: Scheduled

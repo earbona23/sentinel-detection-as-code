@@ -1,0 +1,57 @@
+id: 30bd0712-8041-4950-8ac1-4469f5c1e9ee
+name: Regla de bandeja que reenvia correo fuera de la organizacion
+description: >
+  Detecta la creacion de reglas de bandeja de entrada que reenvian o redirigen mensajes a
+  direcciones externas. Es la forma mas comun de exfiltracion silenciosa tras comprometer una
+  cuenta: el atacante deja de necesitar el acceso porque el correo le llega solo, y la victima
+  no ve nada raro en su bandeja.
+severity: Medium
+severityJustification: >
+  Medium y no High porque el reenvio externo tiene usos legitimos —cuentas personales, asistentes
+  virtuales— y bloquear sin verificar rompe flujos reales. Sube a High si la cuenta tiene acceso
+  a informacion sensible o si la regla ademas borra el mensaje original.
+requiredDataConnectors:
+  - connectorId: Office365
+    dataTypes:
+      - OfficeActivity
+queryFrequency: PT1H
+queryPeriod: PT1H
+triggerOperator: gt
+triggerThreshold: 0
+tactics:
+  - Collection
+relevantTechniques:
+  - T1114.003
+query: |
+  OfficeActivity
+  | where TimeGenerated > ago(1h)
+  | where Operation in ("New-InboxRule", "Set-InboxRule", "UpdateInboxRules")
+  | extend Parametros = tostring(Parameters)
+  | where Parametros has_any ("ForwardTo", "RedirectTo", "ForwardAsAttachmentTo")
+  | project TimeGenerated, UserId, Operation, ClientIP, Parametros
+entityMappings:
+  - entityType: Account
+    fieldMappings:
+      - identifier: FullName
+        columnName: UserId
+  - entityType: IP
+    fieldMappings:
+      - identifier: Address
+        columnName: ClientIP
+falsePositives:
+  - scenario: Usuario que reenvia su correo a una cuenta personal por comodidad.
+    howToDistinguish: >
+      El dominio destino es un proveedor de correo publico conocido y la regla se creo desde la
+      IP habitual del usuario. Sigue siendo una violacion de politica, pero no un ataque.
+  - scenario: Integracion legitima con un sistema de tickets o CRM.
+    howToDistinguish: El destino es un dominio corporativo del proveedor y existe aprobacion.
+responseSteps:
+  - Ver a que dominio reenvia y si pertenece a la organizacion.
+  - "Revisar desde que IP se creo la regla: si no es la habitual del usuario, tratar como compromiso."
+  - Comprobar si la regla ademas marca como leido o borra, que indica intencion de ocultar.
+  - Eliminar la regla y revisar que correo salio mientras estuvo activa.
+validationStatus:
+  state: syntax-only-not-executed
+  notes: Requiere el conector de Office 365; no disponible en una suscripcion Azure gratuita sin M365.
+version: 1.0.0
+kind: Scheduled
