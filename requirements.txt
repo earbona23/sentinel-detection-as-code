@@ -1,0 +1,4 @@
+# Solo lo imprescindible. Cada dependencia es superficie que hay que mantener y auditar.
+jsonschema>=4.21,<5      # validacion estructural contra JSON Schema draft 2020-12
+PyYAML>=6.0,<7           # lectura de las detecciones
+pytest>=8.0,<9           # tests del validador

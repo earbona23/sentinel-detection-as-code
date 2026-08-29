@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# .NET — artefactos de compilacion del linter de KQL
+tools/kql-lint/bin/
+tools/kql-lint/obj/
+
+# El bundle STIX completo de ATT&CK (~54 MB) NUNCA va al repo.
+# Lo que se versiona es el indice destilado en data/mitre-techniques.json.
+enterprise-attack.json
+*.stix.json
+
+# Editores y sistema
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Nada de credenciales, por si acaso
+*.pem
+*.key
+.env
