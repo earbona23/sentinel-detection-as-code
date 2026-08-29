@@ -2,6 +2,9 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net6.0</TargetFramework>
+    <!-- El runner de GitHub ya no trae el runtime 6.0 (sí 8/9/10). Permitir
+         que este binario corra sobre el runtime mayor disponible. -->
+    <RollForward>LatestMajor</RollForward>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>kql-lint</AssemblyName>
