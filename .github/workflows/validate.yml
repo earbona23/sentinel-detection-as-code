@@ -1,0 +1,102 @@
+name: validate detections
+
+# Corre en cada PR y en cada push a main. Un repo de detecciones sin CI es una carpeta de
+# archivos YAML: nada garantiza que lo que se mergea siga siendo valido, y los errores de
+# este dominio son silenciosos —un ID de tecnica inventado despliega igual— asi que revisarlo
+# a ojo no alcanza.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Sin permisos de escritura: este workflow solo lee y valida.
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      # El linter de KQL usa el parser real de Microsoft, que es una libreria .NET.
+      # Sin este paso el validador NO puede comprobar la sintaxis — y por diseño eso hace
+      # fallar la corrida en vez de saltearla en silencio.
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build the KQL linter
+        run: dotnet build -c Release --nologo tools/kql-lint
+
+      # Se comprueba que el linter DISTINGUE una consulta rota de una valida antes de confiar
+      # en el. Un linter que devuelve "todo bien" siempre pasaria la validacion entera sin
+      # revisar nada, y el CI quedaria en verde certificando lo que nadie miro.
+      - name: Self-check — the linter must reject broken KQL
+        run: |
+          set -euo pipefail
+          echo 'SigninLogs | where ResultType == 0' > /tmp/ok.kql
+          echo 'SigninLogs | wher ResultType == 0'  > /tmp/roto.kql
+          DLL=tools/kql-lint/bin/Release/net*/kql-lint.dll
+          if ! dotnet $DLL /tmp/ok.kql  > /dev/null; then
+            echo "::error::el linter rechaza KQL VALIDO — no es de fiar"; exit 1
+          fi
+          if dotnet $DLL /tmp/roto.kql > /dev/null; then
+            echo "::error::el linter ACEPTA KQL roto — no esta validando nada"; exit 1
+          fi
+          echo "el linter distingue KQL valido de roto"
+
+      - name: Unit tests
+        run: python -m pytest -q
+
+      # Comprueba que el indice MITRE del repo salio del bundle oficial y no de una edicion
+      # a mano. Sin esto, "verificado contra MITRE" es una afirmacion sin respaldo.
+      - name: Verify the MITRE index provenance
+        run: |
+          python - <<'PY'
+          import json, pathlib, sys
+          d = json.loads(pathlib.Path("data/mitre-techniques.json").read_text())
+          faltan = [k for k in ("source", "sha256_of_source", "retrieved_utc", "count") if not d.get(k)]
+          if faltan:
+              print(f"::error::al indice MITRE le falta procedencia: {faltan}")
+              sys.exit(1)
+          if d["count"] < 500:
+              print(f"::error::el indice MITRE parece truncado: {d['count']} tecnicas")
+              sys.exit(1)
+          print(f"indice: {d['count']} tecnicas, obtenido {d['retrieved_utc']}")
+          PY
+
+      - name: Validate every detection
+        run: python -m validator.cli
+
+      # El paso anterior falla si hay UNA deteccion invalida. Este comprueba algo distinto:
+      # que efectivamente se haya validado algo. Un directorio vacio no es un exito.
+      - name: Fail if there is nothing to validate
+        run: |
+          set -euo pipefail
+          N=$(find detections -name '*.yaml' -o -name '*.yml' | wc -l)
+          echo "detecciones encontradas: $N"
+          if [ "$N" -lt 1 ]; then
+            echo "::error::no hay detecciones que validar — el verde no significaria nada"
+            exit 1
+          fi
