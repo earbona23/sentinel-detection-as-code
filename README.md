@@ -218,5 +218,4 @@ MIT. Ver [LICENSE](LICENSE).
 
 ---
 
-*Construido por Eduard Arbona con asistencia de IA. Las decisiones de arquitectura, la selección
-de detecciones y los criterios de validación son propios; el código se escribió en colaboración.*
+*Construido por Eduard Arbona.*
